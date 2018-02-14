@@ -11,12 +11,15 @@
 (define SHIP-IMG (overlay (isosceles-triangle SIZE 40 "solid" "gray")
                           (square SIZE 0 "white")))
 (define SHIP-ACCEL-RATE 40)
+(define ASTEROID-START-SIZE 30)
+(define ASTEROID-START-VEL 5)
 
 (module+ test
   (require rackunit))
 
 (struct/lens asteroid-field (ship bullets asteroids) #:transparent)
 (struct/lens ship (loc vel accel angle engine-on) #:transparent)
+(struct/lens asteroid (loc vel size) #:transparent)
 (struct/lens posn (x y) #:transparent)
 
 (define (start)
@@ -25,6 +28,9 @@
     [on-key handle-key-down]
     [on-release handle-key-up]
     [to-draw render-field WIDTH-PX HEIGHT-PX]))
+
+(define (asteroid-img size)
+  (radial-star (+ size 8) (- size 2) size "outline" "black"))
 
 (define (update-field w)
   (lens-transform asteroid-field-ship-lens w next-ship))
@@ -119,9 +125,8 @@
           [else c]))
   (define (coord-adjust-width c) (coord-adjust c WIDTH-PX))
   (define (coord-adjust-height c) (coord-adjust c HEIGHT-PX))
-  (lens-transform posn-y-lens
-                  (lens-transform posn-x-lens p coord-adjust-width)
-                  coord-adjust-height))
+  (lens-transform/list p posn-y-lens coord-adjust-width
+                         posn-x-lens coord-adjust-height))
 
 (module+ test
   (check-equal? (maybe-loop-bounds (posn -1 (add1 HEIGHT-PX))) (posn (sub1 WIDTH-PX) 1))
