@@ -1,44 +1,47 @@
 #lang racket
 (require 2htdp/universe 2htdp/image)
 (require lens)
+(require "posn.rkt")
+(require "ship.rkt")
+(require "asteroid.rkt")
+(require "physics.rkt")
 
 (define TICK-RATE 1/40)
 (define SIZE 20)
 (define WIDTH-PX  (* SIZE 30))
 (define HEIGHT-PX (* SIZE 30))
 (define MT-SCENE (empty-scene WIDTH-PX HEIGHT-PX))
-(define ROTATION-DEG-PER-TICK (* 180 TICK-RATE))
+(define ROTATION-DEG-PER-TICK (* 180 2 TICK-RATE))
 (define SHIP-IMG (overlay (isosceles-triangle SIZE 40 "solid" "gray")
                           (square SIZE 0 "white")))
-(define SHIP-ACCEL-RATE 40)
-(define ASTEROID-START-SIZE 30)
-(define ASTEROID-START-VEL 5)
+(define SHIP-ACCEL-RATE 160)
 
 (module+ test
   (require rackunit))
 
 (struct/lens asteroid-field (ship bullets asteroids) #:transparent)
-(struct/lens ship (loc vel accel angle engine-on) #:transparent)
-(struct/lens asteroid (loc vel size) #:transparent)
-(struct/lens posn (x y) #:transparent)
 
 (define (start)
-  (big-bang (asteroid-field (new-ship) empty empty)
+  (big-bang (asteroid-field (new-ship)
+                            empty
+                            (new-asteroids 8 WIDTH-PX HEIGHT-PX (- 5 ASTEROID-START-VEL) ASTEROID-START-VEL))
     [on-tick update-field TICK-RATE]
     [on-key handle-key-down]
     [on-release handle-key-up]
     [to-draw render-field WIDTH-PX HEIGHT-PX]))
 
-(define (asteroid-img size)
-  (radial-star (+ size 8) (- size 2) size "outline" "black"))
+(define (render-ship s)
+  (rotate (ship-angle s) SHIP-IMG))
 
 (define (update-field w)
-  (lens-transform asteroid-field-ship-lens w next-ship))
+  (lens-transform/list w
+                       asteroid-field-ship-lens next-ship
+                       asteroid-field-asteroids-lens next-asteroids))
 
 (define (handle-key-down w k)
   (cond [(key=? k "up") (world-change-ship fire-thruster w)]
-        [(key=? k "right") (world-change-ship turn-ship-right w)]
-        [(key=? k "left") (world-change-ship turn-ship-left w)]
+        [(key=? k "right") (world-change-ship (curryr turn-ship-right ROTATION-DEG-PER-TICK) w)]
+        [(key=? k "left") (world-change-ship (curryr turn-ship-left ROTATION-DEG-PER-TICK) w)]
         [else w]))
 
 (define (handle-key-up w k)
@@ -48,19 +51,9 @@
 (define (world-change-ship action w)
   (lens-transform asteroid-field-ship-lens w action))
 
-(define (fire-thruster s)
-  (lens-set ship-engine-on-lens s #t))
-
-(define (stop-thruster s)
-  (lens-set ship-engine-on-lens s #f))
-
-(define (turn-ship-right s)
-  (lens-transform ship-angle-lens s (λ (a) (- a ROTATION-DEG-PER-TICK))))
-(define (turn-ship-left s)
-  (lens-transform ship-angle-lens s (λ (a) (+ a ROTATION-DEG-PER-TICK))))
-
 (define (render-field w)
-  (ship+scene (asteroid-field-ship w) MT-SCENE))
+  (asteroids+scene (asteroid-field-asteroids w)
+                   (ship+scene (asteroid-field-ship w) MT-SCENE)))
 
 (define (ship+scene s scene)
   (define loc (ship-loc s))
@@ -68,8 +61,15 @@
                (posn-x loc) (posn-y loc)
                scene))
 
-(define (render-ship s)
-  (rotate (ship-angle s) SHIP-IMG))
+(define (asteroids+scene as scene)
+  (foldl asteroid+scene scene as))
+
+(define (asteroid+scene a scene)
+  (define loc (asteroid-loc a))
+  (place-image (asteroid-img (asteroid-size a)) (posn-x loc) (posn-y loc) scene))
+
+(define (asteroid-img size)
+  (radial-star (+ size 8) (- size 2) size "outline" "black"))
 
 (define (new-ship)
   (ship (posn (/ WIDTH-PX 2) (/ HEIGHT-PX 2))
@@ -77,46 +77,13 @@
         (posn 0 0)
         0
         #f))
-(define (new-ship2)
-  (struct-copy ship (new-ship) [accel (posn 0 -1)]))
-
-(define (posn=? p1 p2)
-  (and (= (posn-x p1) (posn-x p2))
-       (= (posn-y p1) (posn-y p2))))
-
-(define (posn+ p1 p2)
-  (posn (+ (posn-x p1) (posn-x p2))
-        (+ (posn-y p1) (posn-y p2))))
-(module+ test
-  (check-equal? (posn+ (posn 1 2) (posn 3 4)) (posn 4 6)))
-
-(define (posn-rot p angle)
-  (define cos-angle (cos (degrees->radians angle)))
-  (define sin-angle (sin (degrees->radians angle)))
-  (posn (+ (* cos-angle (posn-x p))
-           (* sin-angle (posn-y p)))
-        (+ (* -1 sin-angle (posn-x p))
-           (* cos-angle (posn-y p)))))
-
-(module+ test
-  (check-equal? (posn-rot (posn 1 0) 0) (posn 1 0)))
-
-(define (pos-equation x v a)
-  (+ x (* v TICK-RATE) (* 1/2 a (sqr TICK-RATE))))
-(define (vel-equation v a)
-  (+ v (* a TICK-RATE)))
-(module+ test
-  (define test-vel (/ 1 TICK-RATE))
-  (define test-accel (sqr test-vel))
-  (check-equal? (pos-equation 0 test-vel test-accel) 3/2)
-  (check-equal? (vel-equation 10 test-accel) (+ 10 test-vel)))
 
 (define (next-loc loc vel accel)
-  (posn (pos-equation (posn-x loc) (posn-x vel) (posn-x accel))
-        (pos-equation (posn-y loc) (posn-y vel) (posn-y accel))))
+  (posn (pos-equation (posn-x loc) (posn-x vel) (posn-x accel) TICK-RATE)
+        (pos-equation (posn-y loc) (posn-y vel) (posn-y accel) TICK-RATE)))
 (define (next-vel vel accel)
-  (posn (vel-equation (posn-x vel) (posn-x accel))
-        (vel-equation (posn-y vel) (posn-y accel))))
+  (posn (vel-equation (posn-x vel) (posn-x accel) TICK-RATE)
+        (vel-equation (posn-y vel) (posn-y accel) TICK-RATE)))
 
 (define (maybe-loop-bounds p)
   (define (coord-adjust c maxbound)
@@ -125,8 +92,8 @@
           [else c]))
   (define (coord-adjust-width c) (coord-adjust c WIDTH-PX))
   (define (coord-adjust-height c) (coord-adjust c HEIGHT-PX))
-  (lens-transform/list p posn-y-lens coord-adjust-width
-                         posn-x-lens coord-adjust-height))
+  (lens-transform/list p posn-x-lens coord-adjust-width
+                       posn-y-lens coord-adjust-height))
 
 (module+ test
   (check-equal? (maybe-loop-bounds (posn -1 (add1 HEIGHT-PX))) (posn (sub1 WIDTH-PX) 1))
@@ -141,3 +108,11 @@
                           (posn 0 0))]))
 (module+ test
   (check-equal? (next-ship (new-ship)) (new-ship)))
+
+(define (next-asteroids as)
+  (map next-asteroid as))
+
+(define (next-asteroid a)
+  (struct-copy asteroid a
+               [loc (maybe-loop-bounds (next-loc (asteroid-loc a) (asteroid-vel a) (posn 0 0)))]
+               [vel (next-vel (asteroid-vel a) (posn 0 0))]))
