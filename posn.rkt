@@ -27,8 +27,8 @@
     (define sin-angle (sin (degrees->radians angle)))
     (posn (+ (* cos-angle (posn-x p))
              (* sin-angle (posn-y p)))
-          (+ (* -1 sin-angle (posn-x p))
-             (* cos-angle (posn-y p)))))
+          (- (* cos-angle (posn-y p))
+             (* sin-angle (posn-x p)))))
 
   (define (random-posn boundx boundy)
     (posn (random (max boundx 1))

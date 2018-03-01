@@ -22,16 +22,12 @@
               ASTEROID-START-SIZE))
 
   (define (split-asteroid a)
-    (define 2vel (posn* (asteroid-vel a) (posn 2 2)))
-    (define 2size (* 2 (asteroid-size a)))
-    (define a-vel (posn-rot 2vel (random 360)))
-    (define b-vel (posn-rot 2vel (random 360)))
-    (list (lens-set/list a
-                         asteroid-vel-lens a-vel
-                         asteroid-size-lens 2size)
-          (lens-set/list a
-                         asteroid-vel-lens b-vel
-                         asteroid-size-lens 2size)))
+    (define twice-vel (posn* (asteroid-vel a) (posn 2 2)))
+    (define half-size (/ (asteroid-size a) 2))
+    (define a-vel (posn-rot twice-vel (random 360)))
+    (define b-vel (posn-rot twice-vel (random 360)))
+    (list (asteroid (asteroid-loc a) a-vel half-size)
+          (asteroid (asteroid-loc a) b-vel half-size)))
 
   (module* test #f
     (require rackunit)
