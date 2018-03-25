@@ -1,7 +1,9 @@
 #lang racket
+(module asteroid racket
 (require 2htdp/universe 2htdp/image)
 (require lens)
 (require "posn.rkt")
+(require "bullet.rkt")
 (require "ship.rkt")
 (require "asteroid.rkt")
 (require "physics.rkt")
@@ -15,9 +17,8 @@
 (define SHIP-IMG (overlay (isosceles-triangle SIZE 40 "solid" "gray")
                           (square SIZE 0 "white")))
 (define SHIP-ACCEL-RATE 160)
-
-(module+ test
-  (require rackunit))
+(define BULLET-IMG (circle 2 "outline" "black"))
+(define SHIP-MAX-VELOCITY 100)
 
 (struct/lens asteroid-field (ship bullets asteroids) #:transparent)
 
@@ -36,13 +37,22 @@
 (define (update-field w)
   (lens-transform/list w
                        asteroid-field-ship-lens next-ship
+                       asteroid-field-bullets-lens next-bullets
                        asteroid-field-asteroids-lens next-asteroids))
 
 (define (handle-key-down w k)
   (cond [(key=? k "up") (world-change-ship fire-thruster w)]
         [(key=? k "right") (world-change-ship (curryr turn-ship-right ROTATION-DEG-PER-TICK) w)]
         [(key=? k "left") (world-change-ship (curryr turn-ship-left ROTATION-DEG-PER-TICK) w)]
+        [(key=? k "down") (world-fire-bullet w)]
         [else w]))
+
+(define (world-fire-bullet w)
+  (define s (asteroid-field-ship w))
+  (lens-transform asteroid-field-bullets-lens w
+                  (λ (bs)
+                    (cons (new-bullet (ship-loc s) (ship-angle s))
+                         bs))))
 
 (define (handle-key-up w k)
   (cond [(key=? k "up") (world-change-ship stop-thruster w)]
@@ -52,8 +62,16 @@
   (lens-transform asteroid-field-ship-lens w action))
 
 (define (render-field w)
-  (asteroids+scene (asteroid-field-asteroids w)
-                   (ship+scene (asteroid-field-ship w) MT-SCENE)))
+  (bullets+scene (asteroid-field-bullets w)
+                 (asteroids+scene (asteroid-field-asteroids w)
+                                  (ship+scene (asteroid-field-ship w) MT-SCENE))))
+
+(define (bullets+scene bs scene)
+  (foldl bullet+scene scene bs))
+
+(define (bullet+scene b scene)
+  (define loc (bullet-loc b))
+  (place-image BULLET-IMG (posn-x loc) (posn-y loc) scene))
 
 (define (ship+scene s scene)
   (define loc (ship-loc s))
@@ -95,10 +113,6 @@
   (lens-transform/list p posn-x-lens coord-adjust-width
                        posn-y-lens coord-adjust-height))
 
-(module+ test
-  (check-equal? (maybe-loop-bounds (posn -1 (add1 HEIGHT-PX))) (posn (sub1 WIDTH-PX) 1))
-  (check-equal? (maybe-loop-bounds (posn 1 2)) (posn 1 2)))
-
 (define (next-ship s)
   (struct-copy ship s
                [loc (maybe-loop-bounds (next-loc (ship-loc s) (ship-vel s) (ship-accel s)))]
@@ -106,8 +120,13 @@
                [accel (if (ship-engine-on s)
                           (posn-rot (posn 0 (- SHIP-ACCEL-RATE)) (ship-angle s))
                           (posn 0 0))]))
-(module+ test
-  (check-equal? (next-ship (new-ship)) (new-ship)))
+(define (next-bullets bs)
+  (filter (λ (b) (not (zero? (bullet-ticks b)))) (map next-bullet bs)))
+
+(define (next-bullet b)
+  (struct-copy bullet b
+               [loc (maybe-loop-bounds (next-loc (bullet-loc b) (bullet-vel b) (posn 0 0)))]
+               [ticks (sub1 (bullet-ticks b))]))
 
 (define (next-asteroids as)
   (map next-asteroid as))
@@ -116,3 +135,10 @@
   (struct-copy asteroid a
                [loc (maybe-loop-bounds (next-loc (asteroid-loc a) (asteroid-vel a) (posn 0 0)))]
                [vel (next-vel (asteroid-vel a) (posn 0 0))]))
+
+(module* test #f
+  (require rackunit)
+  (check-equal? (next-ship (new-ship)) (new-ship))
+  (check-equal? (maybe-loop-bounds (posn -1 (add1 HEIGHT-PX))) (posn (sub1 WIDTH-PX) 1))
+  (check-equal? (maybe-loop-bounds (posn 1 2)) (posn 1 2)))
+
